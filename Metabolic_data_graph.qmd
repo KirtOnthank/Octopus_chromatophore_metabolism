@@ -1,0 +1,106 @@
+---
+title: "Metabolic Data Graph"
+author: "Kirt L Onthank"
+format: html
+---
+
+```{r}
+library(svglite)
+```
+
+```{r}
+skin=read.csv("resp_corr.csv")
+```
+
+
+# Graphing
+```{r}
+svg(file="Metabolic_Data.svg",height=25,width=11,pointsize=18)
+no.of.figures=3
+figure.height=0.36
+left=0.05
+ylab.line=3.5
+points.cex=1.5
+line.width=3
+axis.thickness=3
+point.lwd=1
+yaxis.fontsize=1.5
+ylab.fontsize=1.4
+y.mgp=c(3,0,-1)
+mids=seq(from=figure.height/2,to=1-figure.height/2,length.out=no.of.figures)
+
+
+
+par(fig=c(left,1,mids[1]-figure.height/2,mids[1]+figure.height/2),new=T)
+plot(total_resp~mass,data=reg,log="xy",type="n",axes=F,ylab="",xlab="",ylim=c(0.1,1000),xlim=c(0.01,1000))
+lines(predict(resp.nls,newdata=data.frame(mass=seq(from=0.04,to=400,length.out=100)))~seq(from=0.04,to=400,length.out=100),lwd=line.width)
+points(total_resp~mass,data=reg,log="xy",pch=21,bg="#003e65ff",cex=points.cex,lwd=point.lwd)
+points(total_resp~mass,data=reg[all$dataset=="MD2014",],log="xy",pch=21,bg="#9a00d8ff",cex=points.cex,lwd=point.lwd)
+points(total_resp~mass,data=reg[all$dataset=="TH2007",],log="xy",pch=21,bg="#008514ff",cex=points.cex,lwd=point.lwd)
+points(total_resp~mass,data=reg[98:102,],log="xy",pch=21,bg="#b28a00ff",cex=points.cex,lwd=point.lwd)
+axis(1,at=c(0.01,0.1,1,10,100,1000),labels=c(0.01,0.1,1,10,100,1000),cex.axis=1.5,lwd=axis.thickness)
+axis(2,at=c(0.1,1,10,100,1000),labels=c(0.1,1,10,100,1000),lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp)
+mtext("Octopus mass (g)",side=1,cex=1.5,line=3)
+mtext(expression("Total RMR ("*mu*"molO"[2]*" hr"^-1*")"),side=2,cex=ylab.fontsize,line=ylab.line)
+legend("bottomright",c("Onthank, unpub","Onthank et al, 2021","Onthank & Cowles, 2011","Seibel, 1997"),
+       pch=21,pt.bg=c("#003e65ff","#9a00d8ff","#008514ff","#b28a00ff"),
+       bty="n",pt.cex=points.cex,cex=1,pt.lwd=point.lwd)
+
+par(fig=c(left,1,mids[1]-figure.height/2,mids[1]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"C",cex=3)
+
+
+par(fig=c(left,1,mids[2]-figure.height/2,mids[2]+figure.height/2),new=T)
+plot(temp_cor~mass,data=skin,
+     ylim=c(0,35),xlim=c(0,450),
+#     log="xy",
+     type="n",ylab="",xlab="",axes=F
+     )
+#lines(skin_mass_specific~mass,data=skin.est,col="#00a2daff",lwd=line.width)
+#lines(rmr_mass_specific~mass,data=skin.est,col="#a02323ff",lwd=line.width)
+points(temp_cor~mass,data=skin,pch=21,bg="#a02323ff",cex=points.cex,lwd=point.lwd)
+#points(rmr_mass_specific~mass,data=skin.est,pch=21,bg="#a02323ff",cex=points.cex)
+axis(2,lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp)
+axis(1,cex.axis=1.5,lwd=axis.thickness)
+mtext(expression("Area-specific skin MR (nmolO"[2]*" mm"^-2*" hr"^-1*")"),side=2,cex=ylab.fontsize,line=ylab.line)
+mtext("Octopus mass (g)",side=1,cex=1.5,line=3)
+#legend("topright",c("Whole Organism","Chromatophore System"),pch=21,pt.bg=c("#a02323ff","#00a2daff"),bty="n",pt.cex=points.cex,cex=1.5)
+
+par(fig=c(left,1,mids[2]-figure.height/2,mids[2]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"B",cex=3)
+
+
+
+par(fig=c(left,1,mids[3]-figure.height/2,mids[3]+figure.height/2),new=T)
+plot(metab~po2,data=conform,type="n",ylab="",xlab="",axes=F
+   ,ylim=c(-25,200),xlim=c(150,260)
+     )
+lines(predict(conform.lm,newdata=data.frame(po2=seq(from=min(conform$po2),to=max(conform$po2),length.out=100)))~seq(from=min(conform$po2),to=max(conform$po2),length.out=100),lwd=line.width)
+
+points(metab~po2,data=conform,pch=21,bg=c(rep("#00a2daff",17),rep("#a02323ff",17)),cex=points.cex,lwd=point.lwd)
+#points(rmr~mass,data=skin.est,pch=21,bg="#a02323ff",cex=points.cex)
+axis(2,lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp)
+axis(1,cex.axis=1.5,lwd=axis.thickness)
+mtext(expression("Oxygen Consumption Rate ("*mu*"molO"[2]*" hr"^-1*")"),side=2,cex=ylab.fontsize,line=ylab.line)
+mtext(expression("[O"[2]*"] (nmolO"[2]*" L"^-1*")"),side=1,cex=1.5,line=3)
+legend("topright",c("Light Off/Chromatophores Constricted","Light On/Chromatophores Expanded"),pch=21,pt.bg=c("#a02323ff","#00a2daff"),bty="n",pt.cex=points.cex,cex=1,pt.lwd=point.lwd)
+
+
+par(fig=c(left,1,mids[3]-figure.height/2,mids[3]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"A",cex=3)
+
+
+dev.off()
+```
+
+
+```{bash}
+cairosvg Metabolic_Data.svg -o Metabolic_Data.png -d 300
+```
+
+```{bash}
+inkscape $PWD/Metabolic_Data.svg -o $PWD/Metabolic_Data.eps --export-ignore-filters --export-ps-level=3
+```

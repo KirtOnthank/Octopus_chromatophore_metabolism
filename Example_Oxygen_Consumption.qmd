@@ -1,0 +1,273 @@
+---
+title: "Example Oxygen Consumption"
+author: "Kirt L Onthank and Sofie Sonner"
+format: html
+---
+
+```{r, warning=F}
+library(remotes)
+```
+
+```{r, eval=FALSE}
+#install_github("KirtOnthank/OTools")
+```
+
+```{r, warning=F}
+library(OTools)
+```
+
+
+```{r}
+examples=data.frame(oxygen=c('Octo_09r_08-19-2020.txt','Octo_14r_08-19-2020.txt','Octo23_08-18-2020.txt'),
+                    temperature=c('Octo_09r_08-19-2020_temp.txt','Octo_14r_08-19-2020_temp.txt','Octo23_08-18-2020_temp.txt'))
+  
+  
+```
+
+
+
+```{r, warning=F}
+trim.begin=45
+trim.end=15
+```
+
+```{r, warning=F}
+resp=data.frame(matrix(nrow=17,ncol=13))
+colnames(resp)=c("octo","on1","on1.o2","on1.temp","off1","off1.o2","off1.temp","on2","on2.o2","on2.temp","off2","off2.o2","off2.temp")
+```
+
+
+```{r}
+file.dir="metabolic_raw_data"
+```
+
+
+# calculating skin metabolic rates
+```{r}
+
+  octo01=read.pyro(paste(file.dir,examples$oxygen[2],sep="/"))
+  octo01.temp=read.csv(paste(file.dir,examples$temperature[2],sep="/"))
+  octo01.temp$times=octo01.temp$millis/1000
+
+  ## Smoothing temperature at different time offsets
+
+  octo01=cbind(octo01[,1:28],matrix(nrow=nrow(octo01),ncol=26))
+  colnames(octo01)=c(colnames(octo01)[1:28],"tempv6","tempv5","tempv4","tempv3","tempv2","tempv1",
+                     "temp.0","temp.1","temp.2","temp.3","temp.4","temp.5","temp.6","tempv6_filt",
+                     "tempv5_filt","tempv4_filt","tempv3_filt","tempv2_filt","tempv1_filt","temp.0_filt",
+                     "temp.1_filt","temp.2_filt","temp.3_filt","temp.4_filt","temp.5_filt","temp.6_filt")
+
+
+  for (j in -6:6){
+    for (i in 1:nrow(octo01)){
+      octo01[i,35+j]=mean(octo01.temp$temp[which.min(abs(octo01.temp$times-octo01$times[i]+j))])
+    }
+  }
+
+
+  smooth=10
+  coeff=dnorm(seq(from=-3,to=3,length.out=smooth+1))/sum(dnorm(seq(from=-3,to=3,length.out=smooth+1)))
+
+  for (i in -6:6){
+    octo01[,48+i]=filter(octo01[,35+i],coeff)  
+  }
+
+
+  ## Choosing correct time offset
+
+  par(mfrow=c(4,4))
+  par(mar=c(1,1,1,1))
+  for (i in -6:6){
+    plot(octo01$O21/((3.223674e-06*octo01[,48+i]^3.686095+8.338341e-01)^2)~octo01$times,type="l",ylab="",xlab="",main=i,axes=F)
+  }
+
+  # Select the minimum offset that gives substantial improvement. Then put it into the "temp.off" parameter below.
+
+  ## Correcting for temperature using correct time offset
+
+
+  time.off=-4
+  octo01$O21adj=octo01$O21/((3.223674e-06*octo01[,48+time.off]^3.686095+8.338341e-01)^2)
+
+
+
+  ## Applying light correction
+
+  light.off=0.98
+  octo01$O21adj2=octo01$O21adj
+  octo01$O21adj2[octo01$ambient1>20]=octo01$O21adj2[octo01$ambient1>20]/light.off
+  
+
+  ## Defining the start and stop of respiration measurement
+
+  breaks=c(min(which(octo01$times>60+trim.begin)),
+           min(which(octo01$times>360-trim.end)),
+           min(which(octo01$times>360+trim.begin)),
+           min(which(octo01$times>660-trim.end)),
+           min(which(octo01$times>660-trim.begin)),
+           min(which(octo01$times>960-trim.end)),
+           min(which(octo01$times>960-trim.begin)),
+           min(which(octo01$times>1200-trim.end)))
+
+  octo01.10=
+  (octo01$O21adj2[breaks[1]:breaks[2]-5]-
+    octo01$O21adj2[breaks[1]:breaks[2]+5])*
+    (3600/20)*
+    0.000612
+
+  mean(octo01.10*1000)
+  #  mean(octo01.1*1000)
+
+  ## Calculating Respiration rates and filling dataset
+
+  resp$octo[1]=1
+
+  octo01.1=
+  (octo01$O21adj2[breaks[1]:breaks[2]]-
+    octo01$O21adj2[breaks[1]:breaks[2]+1])*
+    (3600/2)*
+    0.000612 #volume of respirometer in liters (it is 612 microliters)
+
+  resp$on1[k]=mean(octo01.1)*1000
+  resp$on1.o2[k]=mean(octo01$O21adj2[breaks[1]:breaks[2]])
+  resp$on1.temp[k]=mean(octo01$tempv5_filt[breaks[1]:breaks[2]])
+
+  octo01.2=
+  (octo01$O21adj2[breaks[3]:breaks[4]]-
+    octo01$O21adj2[breaks[3]:breaks[4]+1])*
+    (3600/2)*
+    0.000612 #volume of respirometer in liters (it is 612 microliters)
+
+  resp$off1[k]=mean(octo01.2)*1000
+  resp$off1.o2[k]=mean(octo01$O21adj2[breaks[3]:breaks[4]])
+  resp$off1.temp[k]=mean(octo01$tempv5_filt[breaks[3]:breaks[4]])
+
+  octo01.3=
+  (octo01$O21adj2[breaks[5]:breaks[6]]-
+    octo01$O21adj2[breaks[5]:breaks[6]+1])*
+    (3600/2)*
+    0.000612 #volume of respirometer in liters (it is 612 microliters)
+
+  resp$on2[k]=mean(octo01.3)*1000
+  resp$on2.o2[k]=mean(octo01$O21adj2[breaks[5]:breaks[6]])
+  resp$on2.temp[k]=mean(octo01$tempv5_filt[breaks[5]:breaks[6]])
+
+  octo01.4=
+  (octo01$O21adj2[breaks[7]:breaks[8]]-
+    octo01$O21adj2[breaks[7]:breaks[8]+1])*
+    (3600/2)*
+    0.000612 #volume of respirometer in liters (it is 612 microliters)
+
+  resp$off2[k]=mean(octo01.4)*1000
+  resp$off2.o2[k]=mean(octo01$O21adj2[breaks[7]:breaks[8]])
+  resp$off2.temp[k]=mean(octo01$tempv5_filt[breaks[7]:breaks[8]])
+
+```
+```{r}
+
+
+#octo01.1.lm=lm(octo01$O21[breaks[1]:breaks[2]]~octo01$times[breaks[1]:breaks[2]])
+octo01.1.lm=lm(O21adj2~times,data=octo01[octo01$times>=60+trim.begin&octo01$times<=360-trim.end,])
+on1=coef(octo01.1.lm)[2]*3600*0.000612*1000*-1
+on1.se=summary(octo01.1.lm)$coefficients[2,2]*3600/2*0.000612*1000
+
+octo01.2.lm=lm(O21adj2~times,data=octo01[octo01$times>=360+trim.begin&octo01$times<=660-trim.end,])
+off1=coef(octo01.2.lm)[2]*3600*0.000612*1000*-1
+off1.se=summary(octo01.2.lm)$coefficients[2,2]
+
+octo01.3.lm=lm(O21adj2~times,data=octo01[octo01$times>=660+trim.begin&octo01$times<=960-trim.end,])
+on2=coef(octo01.3.lm)[2]*3600*0.000612*1000*-1
+on2.se=summary(octo01.3.lm)$coefficients[2,2]
+
+octo01.4.lm=lm(O21adj2~times,data=octo01[octo01$times>=960+trim.begin&octo01$times<=1200-trim.end,])
+off2=coef(octo01.4.lm)[2]*3600*0.000612*1000*-1
+off2.se=summary(octo01.4.lm)$coefficients[2,2]
+
+consumption=c(on1,off1,on2,off2)
+names(consumption)=c("Expanded","Contracted","Expanded","Contracted")
+```
+
+
+
+```{r}
+thicc=2.5
+no.of.figures=2
+figure.height=0.7
+left=0.05
+right=0.95
+ylab.line=2.5
+points.cex=1.5
+line.width=3
+axis.thickness=3
+yaxis.fontsize=1
+ylab.fontsize=1.4
+y.mgp=c(3,0,-0.7)
+mids=seq(from=figure.height/2,to=1-figure.height/2,length.out=no.of.figures)
+blueish="#00a2daff"
+reddish="#a02323ff"
+
+svg(file="Chromatophore_respirometry_example.svg",height=13,width=11,pointsize=18)
+
+par(fig=c(left,right,mids[2]-figure.height/2,mids[2]+figure.height/2))
+plot(O21adj2~times,data=octo01,type="l",col="white",xlim=c(0,1200),
+     axes=F,ylab="",xlab="",lwd=thicc+0.5,ylim=c(230,247))#c(193,211))
+lines(O21adj2~times,data=octo01,type="l",col="grey90",lwd=thicc)
+lines(O21adj2~times,data=octo01[octo01$times>=60+trim.begin&octo01$times<=360-trim.end,],col=blueish,lwd=thicc)
+lines(O21adj2~times,data=octo01[octo01$times>=660+trim.begin&octo01$times<=960-trim.end,],col=blueish,lwd=thicc)
+lines(O21adj2~times,data=octo01[octo01$times>=360+trim.begin&octo01$times<=660-trim.end,],col=reddish,lwd=thicc)
+lines(O21adj2~times,data=octo01[octo01$times>=960+trim.begin&octo01$times<=1200-trim.end,],col=reddish,lwd=thicc)
+# abline(v=c(60,360,660,960)+trim.begin)
+# abline(v=c(360,660,960,1200)-trim.end)
+axis(3,lwd=axis.thickness)
+axis(2,lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp,at=c(230,235,240,245))
+mtext(expression("Respirometer [O"[2]*"] ("*mu*"molO"[2]*" L"^-1*")"),side=2,cex=ylab.fontsize,line=ylab.line)
+mtext("Time (s)",side=3,cex=ylab.fontsize,line=ylab.line)
+
+
+par(fig=c(left,right,mids[2]-figure.height/2,mids[2]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"A",cex=3)
+
+
+par(
+fig=c(left,right,mids[1]-figure.height/2,mids[1]+figure.height/2),
+new=T)
+
+barplot(consumption,col=c(blueish,reddish),border=c(blueish,reddish)
+      ,xlim=c(-0.0,4.8),width=0.8,space=0.5,ylim=c(0,80),axes=F)
+axis(4,lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp)
+lines(c(0.4,4.8),c(0,0),lwd=axis.thickness*2)
+#abline(h=0,lwd=5)
+mtext(expression("Skin O"[2]*" consumption rate (nmolO"[2]*" hr"^-1*")"),side=4,cex=ylab.fontsize,line=ylab.line)
+mtext("Chromatophore State",side=1,cex=ylab.fontsize,line=ylab.line)
+
+
+
+par(fig=c(left,right,mids[1]-figure.height/2,mids[1]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"B",cex=3)
+
+
+#abline(octo01.1.lm)
+#abline(octo01.2.lm)
+#abline(octo01.3.lm)
+#abline(octo01.4.lm)
+
+
+dev.off()
+
+```
+
+
+```{bash}
+cairosvg Chromatophore_respirometry_example.svg -o Chromatophore_respirometry_example.png -d 300
+```
+
+```{bash}
+inkscape Chromatophore_respirometry_example.svg -o Chromatophore_respirometry_example.eps --export-ignore-filters --export-ps-level=3
+```
+
+![Pearson residuals for various chi-square analyses. (A) Relationship of octopus presence during day vs. night, checking for potential bias in frequency of octopus presence. (B) Influence of conspecific presence on octopus behaviors (# of octopuses within the camera frame 1 vs. more than 1); fortification  and periscoping. (C) Frequency of non-resident (visiting) octopus interacting with bottle interior with and without a resident octopus present.](Figure4.png)
+
+
+

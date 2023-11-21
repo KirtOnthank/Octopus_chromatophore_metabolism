@@ -9,7 +9,7 @@ library(remotes)
 ```
 
 ```{r, eval=FALSE}
-install_github("KirtOnthank/OTools")
+#install_github("KirtOnthank/OTools")
 ```
 
 ```{r, warning=F}
@@ -62,7 +62,7 @@ for (k in 1:nrow(file.info)){
   coeff=dnorm(seq(from=-3,to=3,length.out=smooth+1))/sum(dnorm(seq(from=-3,to=3,length.out=smooth+1)))
 
   for (i in -6:6){
-    octo01[,48+i]=filter(octo01[,35+i],coeff)  
+    octo01[,48+i]=stats::filter(octo01[,35+i],coeff)  
   }
 
 
@@ -123,7 +123,7 @@ for (k in 1:nrow(file.info)){
   octo01.10=
   (octo01$O21adj2[breaks[1]:breaks[2]-5]-
     octo01$O21adj2[breaks[1]:breaks[2]+5])*
-    (3600/20)*
+    (3600/2)*
     0.000612
 
   mean(octo01.10*1000)
@@ -134,9 +134,11 @@ for (k in 1:nrow(file.info)){
   resp$octo[1]=1
 
   octo01.1=
-  (octo01$O21adj2[breaks[1]:breaks[2]]-
-    octo01$O21adj2[breaks[1]:breaks[2]+1])*
-    (3600/2)*
+  coef(lm(O21adj2~times,data=octo01[octo01$times>=60+trim.begin&octo01$times<=360-trim.end,]))[2]*-1*
+#  (octo01$O21adj2[breaks[1]:breaks[2]]-
+#    octo01$O21adj2[breaks[1]:breaks[2]+1])*
+#    (3600/2)*
+    3600*
     0.000612 #volume of respirometer in liters (it is 612 microliters)
 
   resp$on1[k]=mean(octo01.1)*1000
@@ -144,9 +146,11 @@ for (k in 1:nrow(file.info)){
   resp$on1.temp[k]=mean(octo01$tempv5_filt[breaks[1]:breaks[2]])
 
   octo01.2=
-  (octo01$O21adj2[breaks[3]:breaks[4]]-
-    octo01$O21adj2[breaks[3]:breaks[4]+1])*
-    (3600/2)*
+  coef(lm(O21adj2~times,data=octo01[octo01$times>=360+trim.begin&octo01$times<=660-trim.end,]))[2]*-1*
+#  (octo01$O21adj2[breaks[3]:breaks[4]]-
+#    octo01$O21adj2[breaks[3]:breaks[4]+1])*
+#    (3600/2)*
+    3600*
     0.000612 #volume of respirometer in liters (it is 612 microliters)
 
   resp$off1[k]=mean(octo01.2)*1000
@@ -154,9 +158,11 @@ for (k in 1:nrow(file.info)){
   resp$off1.temp[k]=mean(octo01$tempv5_filt[breaks[3]:breaks[4]])
 
   octo01.3=
-  (octo01$O21adj2[breaks[5]:breaks[6]]-
-    octo01$O21adj2[breaks[5]:breaks[6]+1])*
-    (3600/2)*
+  coef(lm(O21adj2~times,data=octo01[octo01$times>=660+trim.begin&octo01$times<=960-trim.end,]))[2]*-1*
+#  (octo01$O21adj2[breaks[5]:breaks[6]]-
+#    octo01$O21adj2[breaks[5]:breaks[6]+1])*
+#    (3600/2)*
+    3600*
     0.000612 #volume of respirometer in liters (it is 612 microliters)
 
   resp$on2[k]=mean(octo01.3)*1000
@@ -164,9 +170,11 @@ for (k in 1:nrow(file.info)){
   resp$on2.temp[k]=mean(octo01$tempv5_filt[breaks[5]:breaks[6]])
 
   octo01.4=
-  (octo01$O21adj2[breaks[7]:breaks[8]]-
-    octo01$O21adj2[breaks[7]:breaks[8]+1])*
-    (3600/2)*
+  coef(lm(O21adj2~times,data=octo01[octo01$times>=960+trim.begin&octo01$times<=1200-trim.end,]))[2]*-1*
+#  (octo01$O21adj2[breaks[7]:breaks[8]]-
+#    octo01$O21adj2[breaks[7]:breaks[8]+1])*
+#    (3600/2)*
+    3600*
     0.000612 #volume of respirometer in liters (it is 612 microliters)
 
   resp$off2[k]=mean(octo01.4)*1000
@@ -182,11 +190,16 @@ for (k in 1:nrow(file.info)){
 ```{r, warning=F}
 resp$lognumber=c(1,2,4,5,6,7,9,10,11,13,14,15,16,23,24,25,26)
 resp$mass=c(136,153,59,85,155,46,41,188,152,218,85,390,189,NA,155.5,26.5,308)
+resp$octo=1:17
 ```
 
 
 
 ```{r, warning=F}
-write.csv(resp[,1:13],"skin_resp.csv")
+write.csv(resp,"skin_resp.csv",row.names = F)
 ```
+
+
+
+
 

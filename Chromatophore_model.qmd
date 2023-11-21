@@ -3,24 +3,413 @@ title: "Chromatophore Metbaolic Model"
 author: "Sofie Sonner and Kirt Onthank"
 format: html
 ---
-
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
+# Loading libraries
 ```{r}
-1 + 1
+library(respirometry)
+library(outliers)
+
 ```
 
-You can add options to executable code like this 
 
+
+# Loading metabolic data
 ```{r}
-#| echo: false
-2 * 2
+resp=read.csv("skin_resp.csv")
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+
+
+# Finding the relationship between pO2 and measured metabolic rate
+
+In this first section we determine if the pO[2] of the 
+
+```{r, warning=F}
+resp=resp[1:17,]
+conform=data.frame(cbind(
+  c(resp$on1,resp$off1,resp$on2),
+  c(resp$on1.o2,resp$off1.o2,resp$on2.o2)
+))
+colnames(conform)=c("metab","po2")
+```
+
+```{r, warning=F}
+plot(metab~po2,data=conform)
+```
+
+```{r, warning=F}
+conform.lm=lm(metab~po2,data=conform)
+summary(conform.lm)
+```
+
+
+```{r, warning=F}
+plot(metab~po2,data=conform,pch=21,bg=c(rep("blue",17),rep("red",17)))
+abline(conform.lm)
+```
+
+
+
+```{r Correcting for oxygen level}
+
+cor.metab=
+  conform.lm$residuals+
+  predict(conform.lm,newdata = data.frame(po2=240))
+
+
+corrected=data.frame(cbind(cor.metab[1:17],cor.metab[18:34],cor.metab[35:51]))
+
+colnames(corrected)=c("on1","off1","on2")
+
+corrected$diff=((corrected$on1+corrected$on2)/2)-corrected$off1
+
+resp$diff=((resp$on1+resp$on2)/2)-resp$off1
+```
+
+
+```{r, warning=F}
+area=read.csv("area.csv")
+colnames(area)=c("octo","blue","red","diff")
+```
+
+# Correcting metabolic rates for bubbles in the respirometers
+```{r Correcting for bubbles}
+
+bubbles=rep(0,17)
+bubbles[16]=0.0213
+bubbles[4]=0.0245
+bubbles.vol=(4/3)*pi*(bubbles/2)^3
+
+bubble.corrections=correct_bubble(0.000612,bubbles.vol,19,sal=30)/0.000612
+
+correct.b=corrected
+correct.b$on1=correct.b$on1*bubble.corrections
+correct.b$off1=correct.b$off1*bubble.corrections
+correct.b$on2=correct.b$on2*bubble.corrections
+```
+
+# Finding the difference between chromatophores activated and inactivated
+```{r finding difference}
+correct.b$diff=((correct.b$on1+correct.b$on2)/2)-correct.b$off1 
+```
+
+
+
+```{r, warning=F}
+skin=data.frame(cbind(area,correct.b[c(1:13,16,17),],resp$mass[c(1:13,16,17)]))
+colnames(skin)[c(4,8,9)]=c("delta_area","delta_metab","mass")
+
+skin$per=skin$delta_metab/skin$delta_area
+skin$temp_cor=skin$per*2^((11-19)/10) ##temperture correction to 11C from 19C assuming a Q10 of 2
+```
+
+# checking for and removing outliers
+
+```{r}
+skin.original=skin
+```
+
+```{r}
+skin=skin[skin$delta_area>0,] #removing data in which the chromatophore covered area did not increase when blue light was shined. In other words, LACE did not work in these instances 
+```
+
+Using Dixon's test to iteratively remove outliers values
+```{r}
+
+for (i in 1:nrow(skin)){
+  skin.dix=dixon.test(skin$temp_cor)
+  skin.p=skin.dix$p.value
+  if (skin.dix$p.value<0.05){
+    skin=skin[round(skin$temp_cor,3)!=round(as.numeric(
+      gsub(".* value (-*\\d+\\.\\d+) is an outlier",replacement = "\\1", skin.dix$alternative)
+      ),3),]
+  }
+}
+
+```
+
+```{r}
+write.csv(skin,file = "resp_corr.csv",row.names = F)
+```
+
+
+
+## Hypothesis test to determine if chromatophore metabolic rate is greater than 0.
+
+```{r}
+shapiro.test(skin$temp_cor)
+```
+
+We do not have evidence that our data is not normally distributed, so we compare using a t-test to see if our metabolic rates are significantly different than 0
+
+```{r}
+t.test(skin$temp_cor,alternative="greater",mu=0)
+```
+
+with a p-value of <0.001, I can reject the null hypothesis and accept the alternative hypothesis: That the true metabolic rate is greater than 0.
+
+```{r confidence interval of median}
+resamp=numeric()
+for (i in 1:100000){
+  resamp[i]=median(sample(skin$temp_cor[skin$delta_area>0],replace = T))
+}
+
+quantile(resamp,probs=c(.025,.975))
+```
+
+
+```{r, warning=F}
+hist(skin$temp_cor)
+```
+
+```{r}
+median(skin$temp_cor)
+sd(skin$temp_cor)
+
+```
+
+
+```{r, warning=F}
+hist(resamp,breaks=100, main="",xlim=c(0,40))
+abline(v=median(skin$temp_cor[skin$delta_area>0]),col="red", lwd=2)
+abline(v=quantile(resamp,probs=c(.025,.975)),lty=2,col="red",lwd=2)
+```
+
+# Checking for chromatophore metabolic rate dependence on mass
+
+```{r}
+summary(aov(lm(temp_cor~mass,data=skin)))
+```
+
+
+# Estimating as percentage of total metabolic rate
+
+```{r, warning=F}
+all=read.csv('all_resp.csv')
+all$total_resp=all$resp*all$mass
+seibel=read.csv('seibel1997.csv')
+seibel$total_resp=seibel$resp*seibel$mass
+seibel$cor_resp=seibel$total_resp*2^((11-c(5,5,10,10,10))/10)
+reg=data.frame(mass=c(all$mass,seibel$mass),total_resp=c(all$total_resp,seibel$cor_resp))
+```
+
+
+```{r, warning=F}
+resp.lm=lm(log(reg$total_resp)~log(reg$mass))
+scaling.power=resp.lm$coefficients[2]
+scaling.power
+```
+
+```{r, warning=F}
+lm(log(all$total_resp)~log(all$mass))
+```
+
+```{r, warning=F}
+resp.nls=nls(total_resp~M*mass^scaling.power, data=reg,start=list(M=2))
+resp.nls
+```
+
+
+
+```{r, warning=F}
+plot(total_resp~mass,data=reg,log="xy",axes=F,xlab="Octopus mass (g)",ylab="")
+box()
+axis(1,at=c(0.1,1,10,100),labels=c("0.1","1","10","100"))
+axis(2,at=c(1,10,100,1000))
+mtext(expression("Routine Metabolic Rate ("*mu*"molO"[2]*" g"^-1*" hr"^-1*")"),side=2,line=2.5)
+lines(predict(resp.nls,newdata=data.frame(mass=seq(from=0.04,to=400,length.out=100)))~seq(from=0.04,to=400,length.out=100))
+```
+
+```{r, warning=F}
+octoarea=data.frame(mass=c(33,377), area=c(14826,96929))
+
+area.nls=nls(area~M*mass^t, data=octoarea,start=list(M=1000,t=1),algorithm="port")
+area.nls
+```
+
+```{r, warning=F}
+png("Area_by_mass.png",width=6,height=6,units="in",res=300,pointsize=12)
+plot(area~mass,data=octoarea,ylim=c(0,100000),xlim=c(0,400),axes=F,ylab="",xlab="",
+     type="n")
+mtext(expression("Area (10,000 mm"^2*")"),side=2,line=2.5)
+mtext("Mass (g)",side=1,line=2.5)
+box()
+axis(1)
+axis(2,at=seq(from=0,to=100000,by=20000),labels = c(0,2,4,6,8,10))
+lines(predict(area.nls,newdata=data.frame(mass=seq(from=0,to=400,by=1)))~seq(from=0,to=400,by=1))
+points(area~mass,data=octoarea,pch=21,bg="red",cex=1.3)
+dev.off()
+```
+
+
+
+```{r, warning=F}
+mass.pred=200
+((predict(area.nls,newdata = data.frame(mass=mass.pred))/2)*quantile(resamp,probs=c(.025,.5,.975))/1000)/mass.pred
+predict(resp.nls,newdata = data.frame(mass=mass.pred))/mass.pred
+```
+
+## Individual Estimates
+```{r, warning=F}
+octo.est=(predict(area.nls,newdata = data.frame(mass=skin$octomass))/2)*skin$temp_cor/1000
+```
+
+
+## Plotting data
+
+```{r, warning=F}
+masses=seq(from=25,to=400,by=25)
+#masses=exp(1)^seq(from=log(25),to=log(400),length.out = 500)
+skin.est=data.frame(mass=numeric(),area=numeric(),skin_resp_lo=numeric(),skin_resp_hi=numeric(),skin_resp_mean=numeric(),skin_mass_specific=numeric(),rmr=numeric(),rmr_mass_specific=numeric(),ratio=numeric())
+
+for (i in 1:length(masses)){
+  skin.est[i,3:4]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*quantile(resamp,probs=c(.025,.975))/1000
+  #skin.est[i,3]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*mean(resamp)/1000
+  skin.est[i,5]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*median(skin$temp_cor[skin$delta_area>0])/1000
+}
+skin.est$mass=masses
+skin.est$area=predict(area.nls,newdata=data.frame(mass=masses))
+skin.est$rmr=predict(resp.nls,newdata=data.frame(mass=masses))
+skin.est$skin_mass_specific=skin.est$skin_resp_mean/skin.est$mass
+skin.est$rmr_mass_specific=skin.est$rmr/skin.est$mass
+skin.est$ratio=skin.est$skin_resp_mean/skin.est$rmr
+
+```
+
+
+
+
+```{r, eval=F}
+svg(file="Chromatophore_MR.svg",height=25,width=11,pointsize=18)
+no.of.figures=4
+figure.height=0.33
+left=0.05
+ylab.line=3.5
+points.cex=1.5
+line.width=3
+axis.thickness=3
+yaxis.fontsize=1
+ylab.fontsize=1.4
+y.mgp=c(3,0,-1)
+mids=seq(from=figure.height/2,to=1-figure.height/2,length.out=no.of.figures)
+
+par(fig=c(left,1,mids[1]-figure.height/2,mids[4]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",xlim=c(0,450),axes=F,ylab="",xlab="")
+abline(v=c(100,200,300,400),col="grey")
+#box()
+
+par(fig=c(left,1,mids[1]-figure.height/2,mids[1]+figure.height/2),new=T)
+plot(ratio~mass,data=skin.est,type="n",xlim=c(0,450),axes=F,ylab="",xlab="")
+lines(ratio~mass,data=skin.est,lwd=line.width)
+points(ratio~mass,data=skin.est,pch=21,bg="black",cex=points.cex)
+axis(1,at=seq(from=0,to=400,by=100),cex.axis=1.5,lwd=axis.thickness)
+axis(2,lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp)
+mtext("Octopus mass (g)",side=1,cex=1.5,line=3)
+mtext("Chromatophore MR : Resting MR",side=2,cex=ylab.fontsize,line=ylab.line)
+
+
+par(fig=c(left,1,mids[1]-figure.height/2,mids[1]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"D",cex=3)
+
+
+par(fig=c(left,1,mids[2]-figure.height/2,mids[2]+figure.height/2),new=T)
+plot(total_resp~mass,data=all,ylim=c(0,700),xlim=c(0,450),type="n",ylab="",xlab="",axes=F)
+lines(skin_resp_mean~mass,data=skin.est,lty=1,lwd=line.width,col="#00a2daff")
+lines(rmr~mass,data=skin.est,col="#a02323ff",lwd=line.width)
+points(skin_resp_mean~mass,data=skin.est,pch=21,bg="#00a2daff",cex=points.cex)
+points(rmr~mass,data=skin.est,pch=21,bg="#a02323ff",cex=points.cex)
+axis(2,lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp)
+mtext(expression("Total MR ("*mu*"molO"[2]*" hr"^-1*")"),side=2,cex=ylab.fontsize,line=ylab.line)
+
+par(fig=c(left,1,mids[2]-figure.height/2,mids[2]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"C",cex=3)
+
+
+
+par(fig=c(left,1,mids[3]-figure.height/2,mids[3]+figure.height/2),new=T)
+plot(rmr_mass_specific~mass,data=skin.est,ylim=c(0,4),xlim=c(0,450),type="n",ylab="",xlab="",axes=F)
+lines(skin_mass_specific~mass,data=skin.est,col="#00a2daff",lwd=line.width)
+lines(rmr_mass_specific~mass,data=skin.est,col="#a02323ff",lwd=line.width)
+points(skin_mass_specific~mass,data=skin.est,pch=21,bg="#00a2daff",cex=points.cex)
+points(rmr_mass_specific~mass,data=skin.est,pch=21,bg="#a02323ff",cex=points.cex)
+axis(2,lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp)
+mtext(expression("Mass-specific MR ("*mu*"molO"[2]*" g"^-1*" hr"^-1*")"),side=2,cex=ylab.fontsize,line=ylab.line)
+legend("topright",c("Whole Organism","Chromatophore System"),pch=21,pt.bg=c("#a02323ff","#00a2daff"),bty="n",pt.cex=points.cex,cex=1.5)
+
+par(fig=c(left,1,mids[3]-figure.height/2,mids[3]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"B",cex=3)
+
+
+par(fig=c(left,1,mids[4]-figure.height/2,mids[4]+figure.height/2),new=T)
+plot(area~mass,data=skin.est,xlim=c(0,450),ylim=c(0,100000),type="n",ylab="",xlab="",axes=F)
+lines(area~mass,data=skin.est,col="black",lwd=line.width)
+points(area~mass,data=skin.est,pch=21,bg="black",cex=points.cex)
+axis(2,at=seq(from=0,to=100000,by=20000),labels = c(0,2,4,6,8,10),lwd=axis.thickness,cex.axis=yaxis.fontsize,las=2,mgp=y.mgp)
+mtext(expression("Surface Area (10,000 mm"^2*")"),side=2,line=ylab.line,cex=ylab.fontsize)
+
+par(fig=c(left,1,mids[4]-figure.height/2,mids[4]+figure.height/2),new=T)
+plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
+text(0.05,0.95,"A",cex=3)
+
+
+dev.off()
+```
+
+
+
+```{bash}
+cairosvg Chromatophore_MR.svg -o Chromatophore_MR.png -d 300
+```
+
+```{bash}
+inkscape Chromatophore_MR.svg -o Chromatophore_MR.eps --export-ignore-filters --export-ps-level=3
+```
+
+
+
+
+
+
+
+```{r}
+1-0.15250
+```
+
+
+```{r,echo=F, fig.cap='Chromatophore metabolic rate estimated per octopus'}
+knitr::include_graphics(rep('Chromatophore_MR.svg'))
+```
+
+## Coefficient for chromatophore metabolic rate vs. mass equation
+```{r}
+summary(area.nls)$coefficients[1,1]*median(skin$temp_cor[skin$delta_area>0])/1000
+```
+
+## Estimate of chromatophore metabolic rate for a 100g octopus
+
+```{r}
+estimate.mass=100
+round(((predict(area.nls,newdata = data.frame(mass=estimate.mass))/2)*median(skin$temp_cor[skin$delta_area>0])/1000)/estimate.mass,2)
+```
+
+## Estimate of RMR for a 100g octopus
+```{r}
+round(predict(resp.nls,newdata=data.frame(mass=estimate.mass))/estimate.mass,2)
+```
+
+
+# Attempting metabolic model graph again
+
+```{r}
+masses=seq(from=25,to=400,by=25)
+```
+
+
+```{r}
+format(range(reg$mass),scientific = F)
+
+```
+
+
