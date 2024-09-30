@@ -1,16 +1,222 @@
 ---
-title: "Chromatophore Metbaolic Model"
+title: "Corrections Check"
 author: "Sofie Sonner and Kirt Onthank"
 format: html
 ---
+
+# Correction Toggles
+```{r}
+correction.temp1=FALSE
+correction.light=TRUE
+correction.respO2=FALSE
+correction.bubbles=FALSE
+correction.temp2=TRUE
+correction.q10=2
+correction.outliers=TRUE
+correction.chromdensity=TRUE
+```
+
 # Loading libraries
 ```{r}
+library(remotes)
 library(respirometry)
 library(outliers)
-
+#install_github("KirtOnthank/OTools")
+library(OTools)
 ```
 
 
+```{r, warning=F}
+trim.begin=45
+trim.end=15
+```
+
+```{r, warning=F}
+resp=data.frame(matrix(nrow=17,ncol=13))
+colnames(resp)=c("octo","on1","on1.o2","on1.temp","off1","off1.o2","off1.temp","on2","on2.o2","on2.temp","off2","off2.o2","off2.temp")
+```
+
+
+```{r}
+file.info=read.csv("metab_file_info.csv")
+file.dir="metabolic_raw_data"
+```
+
+
+# calculating skin metabolic rates
+```{r}
+
+for (k in 1:nrow(file.info)){
+
+  octo01=read.pyro(paste(file.dir,file.info$metab_file[k],sep="/"))
+  octo01.temp=read.csv(paste(file.dir,file.info$temp_file[k],sep="/"))
+  octo01.temp$times=octo01.temp$millis/1000
+
+  ## Smoothing temperature at different time offsets
+
+  octo01=cbind(octo01[,1:28],matrix(nrow=nrow(octo01),ncol=26))
+  colnames(octo01)=c(colnames(octo01)[1:28],"tempv6","tempv5","tempv4","tempv3","tempv2","tempv1",
+                     "temp.0","temp.1","temp.2","temp.3","temp.4","temp.5","temp.6","tempv6_filt",
+                     "tempv5_filt","tempv4_filt","tempv3_filt","tempv2_filt","tempv1_filt","temp.0_filt",
+                     "temp.1_filt","temp.2_filt","temp.3_filt","temp.4_filt","temp.5_filt","temp.6_filt")
+
+
+  for (j in -6:6){
+    for (i in 1:nrow(octo01)){
+      octo01[i,35+j]=mean(octo01.temp$temp[which.min(abs(octo01.temp$times-octo01$times[i]+j))])
+    }
+  }
+
+
+  smooth=10
+  coeff=dnorm(seq(from=-3,to=3,length.out=smooth+1))/sum(dnorm(seq(from=-3,to=3,length.out=smooth+1)))
+
+  for (i in -6:6){
+    octo01[,48+i]=stats::filter(octo01[,35+i],coeff)  
+  }
+
+
+  ## Choosing correct time offset
+
+  par(mfrow=c(4,4))
+  par(mar=c(1,1,1,1))
+  for (i in -6:6){
+    plot(octo01$O21/((3.223674e-06*octo01[,48+i]^3.686095+8.338341e-01)^2)~octo01$times,type="l",ylab="",xlab="",main=i,axes=F)
+  }
+
+  # Select the minimum offset that gives substantial improvement. Then put it into the "temp.off" parameter below.
+
+  ## Correcting for temperature using correct time offset
+
+
+  time.off=file.info$time_off[k]
+  if (correction.temp1){
+    octo01$O21adj=octo01$O21/((3.223674e-06*octo01[,48+time.off]^3.686095+8.338341e-01)^2)
+  } else {
+    octo01$O21adj=octo01$O21
+  }
+  
+
+  ## Correcting for light
+
+  par(mfrow=c(3,3))
+  par(mar=c(1,1,1,1))
+
+  for (i in seq(from=0.92,to=1,by=.01)){
+    temp=octo01$O21adj
+    temp[octo01$ambient1>20]=temp[octo01$ambient1>20]/i
+    plot(temp[octo01$ambient1<20]~octo01$times[octo01$ambient1<20],pch=".",axes=F,main=i,col="red",ylim=range(temp,na.rm = T))
+    points(temp[octo01$ambient1>20]~octo01$times[octo01$ambient1>20],pch=".",col="blue")
+    box()
+  }
+
+  # Choose the offset that best aligns the ends of the blue dots to the red dots.
+  
+  ## Applying light correction
+
+  light.off=file.info$light_off[k]
+  octo01$O21adj2=octo01$O21adj
+  
+  if (correction.light){
+    octo01$O21adj2[octo01$ambient1>20]=octo01$O21adj2[octo01$ambient1>20]/light.off
+  }
+  
+  
+  par(mfrow=c(1,1))
+  plot(O21~times,data=octo01,type="l")
+  lines(O21adj2~times,data=octo01,col="red")
+  abline(v=c(60,360,660,960)+trim.begin,col="blue")
+  abline(v=c(360,660,960,1200)-trim.end,col="blue")
+
+  ## Defining the start and stop of respiration measurement
+
+  breaks=c(min(which(octo01$times>60+trim.begin)),
+           min(which(octo01$times>360-trim.end)),
+           min(which(octo01$times>360+trim.begin)),
+           min(which(octo01$times>660-trim.end)),
+           min(which(octo01$times>660-trim.begin)),
+           min(which(octo01$times>960-trim.end)),
+           min(which(octo01$times>960-trim.begin)),
+           min(which(octo01$times>1200-trim.end)))
+
+  octo01.10=
+  (octo01$O21adj2[breaks[1]:breaks[2]-5]-
+    octo01$O21adj2[breaks[1]:breaks[2]+5])*
+    (3600/2)*
+    0.000612
+
+  mean(octo01.10*1000)
+  #  mean(octo01.1*1000)
+
+  ## Calculating Respiration rates and filling dataset
+
+  resp$octo[1]=1
+
+  octo01.1=
+  coef(lm(O21adj2~times,data=octo01[octo01$times>=60+trim.begin&octo01$times<=360-trim.end,]))[2]*-1*
+#  (octo01$O21adj2[breaks[1]:breaks[2]]-
+#    octo01$O21adj2[breaks[1]:breaks[2]+1])*
+#    (3600/2)*
+    3600*
+    0.000612 #volume of respirometer in liters (it is 612 microliters)
+
+  resp$on1[k]=mean(octo01.1)*1000
+  resp$on1.o2[k]=mean(octo01$O21adj2[breaks[1]:breaks[2]])
+  resp$on1.temp[k]=mean(octo01$tempv5_filt[breaks[1]:breaks[2]])
+
+  octo01.2=
+  coef(lm(O21adj2~times,data=octo01[octo01$times>=360+trim.begin&octo01$times<=660-trim.end,]))[2]*-1*
+#  (octo01$O21adj2[breaks[3]:breaks[4]]-
+#    octo01$O21adj2[breaks[3]:breaks[4]+1])*
+#    (3600/2)*
+    3600*
+    0.000612 #volume of respirometer in liters (it is 612 microliters)
+
+  resp$off1[k]=mean(octo01.2)*1000
+  resp$off1.o2[k]=mean(octo01$O21adj2[breaks[3]:breaks[4]])
+  resp$off1.temp[k]=mean(octo01$tempv5_filt[breaks[3]:breaks[4]])
+
+  octo01.3=
+  coef(lm(O21adj2~times,data=octo01[octo01$times>=660+trim.begin&octo01$times<=960-trim.end,]))[2]*-1*
+#  (octo01$O21adj2[breaks[5]:breaks[6]]-
+#    octo01$O21adj2[breaks[5]:breaks[6]+1])*
+#    (3600/2)*
+    3600*
+    0.000612 #volume of respirometer in liters (it is 612 microliters)
+
+  resp$on2[k]=mean(octo01.3)*1000
+  resp$on2.o2[k]=mean(octo01$O21adj2[breaks[5]:breaks[6]])
+  resp$on2.temp[k]=mean(octo01$tempv5_filt[breaks[5]:breaks[6]])
+
+  octo01.4=
+  coef(lm(O21adj2~times,data=octo01[octo01$times>=960+trim.begin&octo01$times<=1200-trim.end,]))[2]*-1*
+#  (octo01$O21adj2[breaks[7]:breaks[8]]-
+#    octo01$O21adj2[breaks[7]:breaks[8]+1])*
+#    (3600/2)*
+    3600*
+    0.000612 #volume of respirometer in liters (it is 612 microliters)
+
+  resp$off2[k]=mean(octo01.4)*1000
+  resp$off2.o2[k]=mean(octo01$O21adj2[breaks[7]:breaks[8]])
+  resp$off2.temp[k]=mean(octo01$tempv5_filt[breaks[7]:breaks[8]])
+
+}
+```
+
+
+
+## Adding Octopus mass to dataset
+```{r, warning=F}
+resp$lognumber=c(1,2,4,5,6,7,9,10,11,13,14,15,16,23,24,25,26)
+resp$mass=c(136,153,59,85,155,46,41,188,152,218,85,390,189,NA,155.5,26.5,308)
+resp$octo=1:17
+```
+
+
+
+```{r, warning=F}
+write.csv(resp,"skin_resp.csv",row.names = F)
+```
 
 # Loading metabolic data
 ```{r}
@@ -21,7 +227,7 @@ resp=read.csv("skin_resp.csv")
 
 # Finding the relationship between pO2 and measured metabolic rate
 
-In this first section we determine if the pO[2] of the respirometer impacts the metabolic rate.
+In this first section we determine if the pO[2] of the respirometer
 
 ```{r, warning=F}
 resp=resp[1:17,]
@@ -32,9 +238,6 @@ conform=data.frame(cbind(
 colnames(conform)=c("metab","po2")
 ```
 
-```{r, warning=F}
-plot(metab~po2,data=conform)
-```
 
 ```{r, warning=F}
 conform.lm=lm(metab~po2,data=conform)
@@ -42,18 +245,18 @@ summary(conform.lm)
 ```
 
 
-```{r, warning=F}
-plot(metab~po2,data=conform,pch=21,bg=c(rep("blue",17),rep("red",17)))
-abline(conform.lm)
-```
 
 
 
 ```{r Correcting for oxygen level}
 
-cor.metab=
-  conform.lm$residuals+
-  predict(conform.lm,newdata = data.frame(po2=240))
+if (correction.respO2){
+  cor.metab=
+    conform.lm$residuals+
+    predict(conform.lm,newdata = data.frame(po2=240))
+} else {
+  cor.metab=conform$metab
+}
 
 
 corrected=data.frame(cbind(cor.metab[1:17],cor.metab[18:34],cor.metab[35:51]))
@@ -82,9 +285,13 @@ bubbles.vol=(4/3)*pi*(bubbles/2)^3
 bubble.corrections=correct_bubble(0.000612,bubbles.vol,19,sal=30)/0.000612
 
 correct.b=corrected
-correct.b$on1=correct.b$on1*bubble.corrections
-correct.b$off1=correct.b$off1*bubble.corrections
-correct.b$on2=correct.b$on2*bubble.corrections
+
+if (correction.bubbles){
+  correct.b$on1=correct.b$on1*bubble.corrections
+  correct.b$off1=correct.b$off1*bubble.corrections
+  correct.b$on2=correct.b$on2*bubble.corrections
+}
+
 ```
 
 # Finding the difference between chromatophores activated and inactivated
@@ -99,7 +306,13 @@ skin=data.frame(cbind(area,correct.b[c(1:13,16,17),],resp$mass[c(1:13,16,17)]))
 colnames(skin)[c(4,8,9)]=c("delta_area","delta_metab","mass")
 
 skin$per=skin$delta_metab/skin$delta_area
-skin$temp_cor=skin$per*2^((11-19)/10) ##temperture correction to 11C from 19C assuming a Q10 of 2
+
+if (correction.temp2){
+  skin$temp_cor=skin$per*correction.q10^((11-19)/10) ##temperture correction to 11C from 19C assuming a Q10 specified
+} else {
+  skin$temp_cor=skin$per
+}
+
 ```
 
 # Checking for and removing outliers
@@ -131,8 +344,10 @@ upper_fence=Q3 + k * IQR
 outliers=skin$temp_cor[skin$temp_cor < lower_fence | skin$temp_cor > upper_fence]
 
 # Remove outliers from dataset
+if (correction.outliers){
+  skin=skin[!skin$temp_cor %in% outliers,]
+}
 
-skin=skin[!skin$temp_cor %in% outliers,]
 
 ```
 
@@ -258,6 +473,7 @@ Testing to see if a a 0.67 scaling power would change much
 area2.nls=nls(area~M*mass^0.67, data=octoarea,start=list(M=1000),algorithm="port")
 area2.nls
 ```
+
 ```{r}
 png("Area_by_mass_comp.png",width=6,height=6,units="in",res=300,pointsize=12)
 plot(area~mass,data=octoarea,ylim=c(0,100000),xlim=c(0,400),axes=F,ylab="",xlab="",
@@ -306,11 +522,21 @@ masses=seq(from=25,to=400,by=25)
 #masses=exp(1)^seq(from=log(25),to=log(400),length.out = 500)
 skin.est=data.frame(mass=numeric(),area=numeric(),skin_resp_lo=numeric(),skin_resp_hi=numeric(),skin_resp_mean=numeric(),skin_mass_specific=numeric(),rmr=numeric(),rmr_mass_specific=numeric(),ratio=numeric())
 
-for (i in 1:length(masses)){
-  skin.est[i,3:4]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*quantile(resamp,probs=c(.025,.975))/1000
-  #skin.est[i,3]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*mean(resamp)/1000
-  skin.est[i,5]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*median(skin$temp_cor[skin$delta_area>0])/1000
+if (correction.chromdensity){
+  for (i in 1:length(masses)){
+    skin.est[i,3:4]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*quantile(resamp,probs=c(.025,.975))/1000
+    #skin.est[i,3]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*mean(resamp)/1000
+    skin.est[i,5]=(predict(area.nls,newdata = data.frame(mass=masses[i]))/2)*median(skin$temp_cor[skin$delta_area>0])/1000
+  }
+} else {
+  for (i in 1:length(masses)){
+    skin.est[i,3:4]=(predict(area.nls,newdata = data.frame(mass=masses[i])))*quantile(resamp,probs=c(.025,.975))/1000
+    #skin.est[i,3]=(predict(area.nls,newdata = data.frame(mass=masses[i])))*mean(resamp)/1000
+    skin.est[i,5]=(predict(area.nls,newdata = data.frame(mass=masses[i])))*median(skin$temp_cor[skin$delta_area>0])/1000
+  }
 }
+
+
 skin.est$mass=masses
 skin.est$area=predict(area.nls,newdata=data.frame(mass=masses))
 skin.est$rmr=predict(resp.nls,newdata=data.frame(mass=masses))
@@ -414,9 +640,6 @@ dev.off()
 cairosvg Chromatophore_MR.svg -o Chromatophore_MR.png -d 300
 ```
 
-```{bash}
-inkscape Chromatophore_MR.svg -o Chromatophore_MR.eps --export-ignore-filters --export-ps-level=3
-```
 
 
 
@@ -442,7 +665,17 @@ summary(area.nls)$coefficients[1,1]*median(skin$temp_cor[skin$delta_area>0])/100
 
 ```{r}
 estimate.mass=100
-round(((predict(area.nls,newdata = data.frame(mass=estimate.mass))/2)*median(skin$temp_cor[skin$delta_area>0])/1000)/estimate.mass,2)
+
+if (correction.chromdensity){
+  round(((predict(area.nls,newdata = 
+    data.frame(mass=estimate.mass))/2)*median(skin$temp_cor[skin$delta_area>0])/1000)/estimate.mass,2)
+} else{
+    round(((predict(area.nls,newdata = 
+    data.frame(mass=estimate.mass)))*median(skin$temp_cor[skin$delta_area>0])/1000)/estimate.mass,2)
+}
+  
+
+
 ```
 
 ## Estimate of RMR for a 100g octopus

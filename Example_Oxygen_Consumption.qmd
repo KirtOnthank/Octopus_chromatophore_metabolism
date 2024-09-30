@@ -226,7 +226,8 @@ mtext("Time (s)",side=3,cex=ylab.fontsize,line=ylab.line)
 
 par(fig=c(left,right,mids[2]-figure.height/2,mids[2]+figure.height/2),new=T)
 plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
-text(0.05,0.95,"A",cex=3)
+#text(0.05,0.95,"A",cex=3)
+text(0.05,0.95,substitute(paste(bold('(a)'))),cex=ylab.fontsize) # for nature
 
 
 par(
@@ -245,7 +246,8 @@ mtext("Chromatophore State",side=1,cex=ylab.fontsize,line=ylab.line)
 
 par(fig=c(left,right,mids[1]-figure.height/2,mids[1]+figure.height/2),new=T)
 plot(c(0,1),c(0,1),type="n",axes=F,ylab="",xlab="")
-text(0.05,0.95,"B",cex=3)
+#text(0.05,0.95,"B",cex=3)
+text(0.05,0.95,substitute(paste(bold('(b)'))),cex=ylab.fontsize) # for nature
 
 
 #abline(octo01.1.lm)
